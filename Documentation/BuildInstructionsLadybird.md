@@ -117,7 +117,7 @@ Xcode 15 or clang from homebrew is required to successfully build ladybird.
 
 ```
 xcode-select --install
-brew install autoconf autoconf-archive automake ccache cmake nasm ninja pkg-config
+brew install autoconf autoconf-archive automake ccache cmake nasm ninja pkg-config flex bison
 ```
 
 If you wish to use clang from homebrew instead:
@@ -128,6 +128,30 @@ brew install llvm@20
 If you also plan to use the Qt UI on macOS:
 ```
 brew install qt
+```
+
+The following environment variables are important to ensure all tools and libraries are correctly found and used during compilation. Defining these helps avoid build errors due to mismatched or missing toolchain components, especially when using Homebrew-installed LLVM, Flex, and Bison:
+
+```bash
+export AR="/opt/homebrew/opt/llvm/bin/llvm-ar"
+export CC="/opt/homebrew/opt/llvm/bin/clang"
+export CXX="/opt/homebrew/opt/llvm/bin/clang++"
+
+export CPPFLAGS="-I/opt/homebrew/opt/flex/include \
+                 -I/opt/homebrew/opt/bison/include \
+                 -I/opt/homebrew/opt/llvm/include"
+
+export LDFLAGS="-L/opt/homebrew/opt/flex/lib \
+                -L/opt/homebrew/opt/bison/lib \
+                -L/opt/homebrew/opt/llvm/lib \
+                -L/opt/homebrew/opt/llvm/lib/c++ \
+                -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++"
+
+export PATH="/opt/homebrew/opt/ccache/libexec:$PATH"
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+export PATH="/opt/homebrew/opt/bison/bin:$PATH"
+export PATH="/opt/homebrew/opt/flex/bin:$PATH"
+export PATH="/opt/homebrew/bin/ninja:$PATH"
 ```
 
 > [!NOTE]
@@ -231,119 +255,3 @@ something went wrong building those dependencies. The output in your terminal wi
 wrong, but it should look something like:
 
 ```
-error: building skia:x64-linux failed with: BUILD_FAILED
-Elapsed time to handle skia:x64-linux: 1.6 s
-
--- Running vcpkg install - failed
-CMake Error at Toolchain/Tarballs/vcpkg/scripts/buildsystems/vcpkg.cmake:899 (message):
-  vcpkg install failed.  See logs for more information:
-  Build/release/vcpkg-manifest-install.log
-Call Stack (most recent call first):
-  /usr/share/cmake-3.30/Modules/CMakeDetermineSystem.cmake:146 (include)
-  CMakeLists.txt:15 (project)
-
-CMake Error: CMake was unable to find a build program corresponding to "Ninja".  CMAKE_MAKE_PROGRAM is not set.  You probably need to select a different build tool.
--- Configuring incomplete, errors occurred!  See logs for more information:
-  Build/release/vcpkg-manifest-install.log
-```
-
-If the error is not immediately clear from the terminal output, be sure to check the specified `vcpkg-manifest-install.log`.
-for more information.
-
-### Resource files
-
-Ladybird requires resource files from the ladybird/Base/res directory in order to properly load
-icons, fonts, and other theming information. These files are copied into the build directory by
-special CMake rules. The expected location of resource files can be tweaked by packagers using
-the standard CMAKE_INSTALL_DATADIR variable. CMAKE_INSTALL_DATADIR is expected to be a path relative
-to CMAKE_INSTALL_PREFIX. If it is not, things will break.
-
-### Custom CMake build directory
-
-The script Meta/ladybird.py and the default preset in CMakePresets.json both define a build directory of
-`Build/release`. For distribution purposes, or when building multiple configurations, it may be useful to create a custom
-CMake build directory.
-
-The install rules in UI/cmake/InstallRules.cmake define which binaries and libraries will be
-installed into the configured CMAKE_PREFIX_PATH or path passed to ``cmake --install``.
-
-Note that when using a custom build directory rather than Meta/ladybird.py, the user may need to provide a suitable C++
-compiler (see [Build Prerequisites](BuildInstructionsLadybird.md#build-prerequisites)) via the CMAKE_C_COMPILER and
-CMAKE_CXX_COMPILER cmake options.
-
-```
-cmake --preset default -B MyBuildDir
-# optionally, add -DCMAKE_CXX_COMPILER=<suitable compiler> -DCMAKE_C_COMPILER=<matching c compiler>
-cmake --build --preset default MyBuildDir
-ninja -C MyBuildDir run-ladybird
-```
-
-### Building with limited system memory
-
-The default build mode will run as many build steps in parallel as possible, which includes link steps;
-this may be an issue for users with limited system memory (or users building with fat LTO in general).
-If you wish to reduce the number of parallel link jobs, you may use the LAGOM_LINK_POOL_SIZE cmake option
-to set a maximum limit for the number of parallel link jobs.
-
-```
-cmake --preset default -B MyBuildDir -DLAGOM_LINK_POOL_SIZE=2
-```
-
-### Running manually
-
-The Meta/ladybird.py script will execute the `run-ladybird` and `debug-ladybird` custom targets.
-If you don't want to use the ladybird.py script to run the application, you can run the following commands:
-
-To automatically run in gdb:
-```
-ninja -C Build/release debug-ladybird
-```
-
-To run without ninja rule on non-macOS systems:
-```
-./Build/release/bin/Ladybird
-```
-
-To run without ninja rule on macOS:
-```
-open -W --stdout $(tty) --stderr $(tty) ./Build/release/bin/Ladybird.app
-
-# Or to launch with arguments:
-open -W --stdout $(tty) --stderr $(tty) ./Build/release/bin/Ladybird.app --args https://ladybird.dev
-```
-
-### Experimental GN build
-
-There is an experimental GN build for Ladybird. It is not officially supported, but it is kept up to date on a best-effort
-basis by interested contributors. See the [GN build instructions](../Meta/gn/README.md) for more information.
-
-In general, the GN build organizes ninja rules in a more compact way than the CMake build, and it may be faster on some systems.
-GN also allows building host and cross-targets in the same build directory, which is useful for managing dependencies on host tools when
-cross-compiling to other platforms.
-
-### Debugging with CLion
-
-Ladybird should be built with debug symbols first. This can be done by adding `-DCMAKE_BUILD_TYPE=Debug` to the cmake command line,
-or selecting the Build Type Debug in the CLion CMake profile.
-
-After running Ladybird as suggested above with `./Meta/ladybird.py run ladybird`, you can now in CLion use Run -> Attach to Process to connect. If debugging layout or rendering issues, filter the listing that opens for `WebContent` and attach to that.
-
-Now breakpoints, stepping and variable inspection will work.
-
-### Debugging with Xcode or Instruments on macOS
-
-If all you want to do is use Instruments, then an Xcode project is not required.
-
-Simply run the `ladybird.py` script as normal, and then make sure to codesign the Ladybird binary with the proper entitlements to allow Instruments to attach to it.
-
-```
-./Meta/ladybird.py build
- ninja -C Build/release apply-debug-entitlements
- # or
- codesign -s - -v -f --entitlements Meta/debug.plist Build/release/bin/Ladybird.app
-```
-
-Now you can open the Instruments app and point it to the Ladybird app bundle.
-
-Building the project with Xcode is not supported. The Xcode project generated by CMake does not properly execute custom
-targets, and does not handle all target names in the project.
